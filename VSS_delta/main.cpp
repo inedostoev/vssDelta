@@ -176,6 +176,10 @@ void deletefile(PUSN_RECORD record) {
 	printf("FileName: %.*ls\n", filenameend - filename, filename);
 }
 
+void overflowJournal() {
+	printf("Journal overflow\n");
+}
+
 
 int main() {
 	IVssBackupComponents* ppBackup1;
@@ -210,6 +214,7 @@ int main() {
 	ops->addFileHandle = addfile;
 	ops->changeFileHandle = changefile;
 	ops->deleteFileHandle = deletefile;
+	ops->overflowJournal = overflowJournal;
 
 
 	compareVolumeShadowCopies(backupVolume, modifiedVolume, ops);

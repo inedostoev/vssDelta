@@ -8,6 +8,7 @@ struct ops {
 	void (*addFileHandle)(PUSN_RECORD record);
 	void (*changeFileHandle)(PUSN_RECORD record);
 	void (*deleteFileHandle)(PUSN_RECORD record);
+	void (*overflowJournal)();
 };
 
 void compareVolumeShadowCopies(HANDLE backupVolume, HANDLE modifiedVolume, struct ops *ops);

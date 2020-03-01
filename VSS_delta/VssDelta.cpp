@@ -31,6 +31,17 @@ void compareVolumeShadowCopies(HANDLE backupVolume, HANDLE modifiedVolume, struc
 	PUSN_JOURNAL_DATA mJournal = bJournal + 1;
 	bJournal = getUsnJournalData(backupVolume, bJournal, sizeof(USN_JOURNAL_DATA));
 	mJournal = getUsnJournalData(modifiedVolume, mJournal, sizeof(USN_JOURNAL_DATA));
+
+	if (bJournal->UsnJournalID != mJournal->UsnJournalID) {
+		if (ops->overflowJournal)
+			ops->overflowJournal();
+	}
+
+	if (bJournal->NextUsn < mJournal->AllocationDelta) {
+		if (ops->overflowJournal)
+			ops->overflowJournal();
+	}
+
 	
 	DWORD bytecount = 1;
 	DWORDLONG nextid = 0;
