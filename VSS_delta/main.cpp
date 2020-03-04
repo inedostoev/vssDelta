@@ -28,6 +28,9 @@ if (hr != S_OK) {		 \
 #define DEBUG_PRINT(fmt, args)
 #endif
 
+HANDLE backupVolume;
+HANDLE modifiedVolume;
+
 
 typedef HRESULT(STDAPICALLTYPE* _CreateVssBackupComponentsInternal)(
 	__out IVssBackupComponents** ppBackup
@@ -57,13 +60,13 @@ int initVSSmodule() {
 	return 0;
 }
 
-WCHAR* createSnapshot(IVssBackupComponents *ppBackup) {
+WCHAR* createSnapshot(IVssBackupComponents *ppBackup, VSS_BACKUP_TYPE type) {
 
 	HRESULT hr;
 	hr = ppBackup->InitializeForBackup();
 	IS_OK("Failed at InitializeForBackup Stage\n")
 	
-	hr = ppBackup->SetBackupState(FALSE, FALSE, VSS_BT_INCREMENTAL);
+	hr = ppBackup->SetBackupState(FALSE, FALSE, type);
 	IS_OK("Failed at SetBackup Stage\n")
 
 	hr = ppBackup->SetContext(VSS_CTX_FILE_SHARE_BACKUP);
@@ -142,6 +145,60 @@ HANDLE openFile(WCHAR* path) {
 	return volume;
 }
 
+BOOL fibmap(HANDLE volume, ULONGLONG FileRefNum) {
+
+	FILE_ID_DESCRIPTOR fid = { sizeof(fid), FileIdType };
+	fid.FileId.QuadPart = FileRefNum;
+
+	HANDLE drive = OpenFileById(volume, &fid, 0, FILE_SHARE_READ, 0, 0);
+
+	if (drive == INVALID_HANDLE_VALUE)
+	{
+		return GetLastError();
+	}
+
+	STARTING_VCN_INPUT_BUFFER inputVcn;
+	RETRIEVAL_POINTERS_BUFFER outputBuf;
+
+	inputVcn.StartingVcn.QuadPart = 0;
+
+	DWORD error = NO_ERROR;
+	BOOL result = false;
+
+	do {
+		DWORD dwBytesReturned;
+		result = DeviceIoControl(drive,
+			FSCTL_GET_RETRIEVAL_POINTERS,
+			&inputVcn,
+			sizeof(STARTING_VCN_INPUT_BUFFER),
+			&outputBuf,
+			sizeof(RETRIEVAL_POINTERS_BUFFER),
+			&dwBytesReturned,
+			NULL);
+
+		error = GetLastError();
+		switch (error) {
+		case ERROR_HANDLE_EOF:  /* end file */
+			result = true;
+			break;
+		case ERROR_MORE_DATA:
+			inputVcn.StartingVcn = outputBuf.Extents[0].NextVcn;
+		case NO_ERROR:
+			printf("VCN:0x%I64x\tLCN: 0x%I64x\n", outputBuf.StartingVcn.QuadPart, outputBuf.Extents->Lcn);
+			
+			//for (int i = 0; i < outputBuf.ExtentCount; i++) {
+			//	printf("\tNextVCN: 0x%I64x, Lcn: 0x%I64x\n", outputBuf.Extents[i].NextVcn, outputBuf.Extents[i].Lcn);
+			//}
+
+			result = true;
+			break;
+		default:
+			printf("fibmap: unexpected error\n");
+			break;
+		}
+	} while (error == ERROR_MORE_DATA);
+	return result;
+}
 
 void addfile(PUSN_RECORD record) {
 	printf("==========================ADD=======================\n");
@@ -152,6 +209,7 @@ void addfile(PUSN_RECORD record) {
 	filenameend = (WCHAR*)(((BYTE*)record) + record->FileNameOffset + record->FileNameLength);
 
 	printf("FileName: %.*ls\n", filenameend - filename, filename);
+
 }
 
 void changefile(PUSN_RECORD record) {
@@ -164,6 +222,12 @@ void changefile(PUSN_RECORD record) {
 	filenameend = (WCHAR*)(((BYTE*)record) + record->FileNameOffset + record->FileNameLength);
 
 	printf("FileName: %.*ls\n", filenameend - filename, filename);
+
+	printf("BACKUP\n");
+	fibmap(backupVolume, record->FileReferenceNumber);
+	printf("MODIFIED\n");
+	fibmap(modifiedVolume, record->FileReferenceNumber);
+
 }
 
 void deletefile(PUSN_RECORD record) {
@@ -193,22 +257,25 @@ int main() {
 	makeChanges("NoChangeFile.c");
 	makeChanges("deleteFile.c");
 
+	
 	CreateVssBackupComponentsInternal_I(&ppBackup1);
-	deviceObjName1 = createSnapshot(ppBackup1);
+	deviceObjName1 = createSnapshot(ppBackup1, VSS_BT_FULL);
 	wprintf(L"%s\n", deviceObjName1);
 
 	system("del deleteFile.c");
 	makeChanges("ChangeFile.c");
 	makeChanges("addFile.c");
+	
 
 	CreateVssBackupComponentsInternal_I(&ppBackup2);
-	deviceObjName2 = createSnapshot(ppBackup2);
+	deviceObjName2 = createSnapshot(ppBackup2, VSS_BT_INCREMENTAL);
 	wprintf(L"%s\n", deviceObjName2);
 
+	
 	system("pause");	
 
-	HANDLE backupVolume = openFile(deviceObjName1);
-	HANDLE modifiedVolume = openFile(deviceObjName2);
+	backupVolume = openFile(deviceObjName1);
+	modifiedVolume = openFile(deviceObjName2);
 
 	struct ops *ops = (struct ops*)calloc(1, sizeof(struct ops));
 	ops->addFileHandle = addfile;
